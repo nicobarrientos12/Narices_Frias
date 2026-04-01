@@ -1,8 +1,9 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { env } = require('../config/env');
+const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../utils/jwt');
+const { createCaptchaChallenge, verifyCaptchaResponse } = require('../utils/captcha');
 const usuarioRepo = require('../repositories/usuario.repository');
 const resetRepo = require('../repositories/passwordResetToken.repository');
 
@@ -35,29 +36,28 @@ function ensureTransporter() {
   });
 }
 
-async function login({ correo, contrasena }) {
-  if (!correo || !contrasena) {
-    const err = new Error('correo y contrasena son requeridos');
+async function login({ correo, contrasena, captcha_token, captcha_answer }) {
+  if (!correo || !contrasena || !captcha_token || captcha_answer === undefined || captcha_answer === null || captcha_answer === '') {
+    const err = new Error('correo, contrasena y captcha son requeridos');
     err.status = 400;
     throw err;
   }
+  verifyCaptchaResponse({ captcha_token, captcha_answer });
   const usuario = await usuarioRepo.findByEmail(correo);
   if (!usuario) {
-    const err = new Error('Credenciales invalidas');
-    err.status = 401;
+    const err = new Error('Usuario no encontrado');
+    err.status = 404;
     throw err;
   }
   const ok = await bcrypt.compare(contrasena, usuario.contrasena);
   if (!ok) {
-    const err = new Error('Credenciales invalidas');
-    err.status = 401;
+    const err = new Error('Contrasena incorrecta');
+    err.status = 400;
     throw err;
   }
-  const token = jwt.sign(
-    { sub: usuario.id, rol: usuario.rol, correo: usuario.correo },
-    env.JWT_SECRET,
-    { expiresIn: '8h' }
-  );
+  const jwtPayload = { sub: usuario.id, rol: usuario.rol, correo: usuario.correo };
+  const token = signAccessToken(jwtPayload);
+  const refresh_token = signRefreshToken({ sub: usuario.id, typ: 'refresh' });
   const safeUser = {
     id: usuario.id,
     nombre: usuario.nombre,
@@ -66,7 +66,54 @@ async function login({ correo, contrasena }) {
     correo: usuario.correo,
     rol: usuario.rol,
   };
-  return { message: 'Login OK', token, usuario: safeUser };
+  return { message: 'Login OK', token, refresh_token, usuario: safeUser };
+}
+
+async function getCaptcha() {
+  return createCaptchaChallenge();
+}
+
+async function refresh({ refresh_token }) {
+  if (!refresh_token) {
+    const err = new Error('refresh_token es requerido');
+    err.status = 400;
+    throw err;
+  }
+
+  let payload;
+  try {
+    payload = verifyRefreshToken(refresh_token);
+  } catch (e) {
+    const err = new Error(e?.name === 'TokenExpiredError' ? 'Refresh token expirado' : 'Refresh token invalido');
+    err.status = 401;
+    throw err;
+  }
+
+  if (payload?.typ && payload.typ !== 'refresh') {
+    const err = new Error('Refresh token invalido');
+    err.status = 401;
+    throw err;
+  }
+
+  const userId = Number(payload?.sub);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    const err = new Error('Refresh token invalido');
+    err.status = 401;
+    throw err;
+  }
+
+  const usuario = await usuarioRepo.findById(userId);
+  if (!usuario) {
+    const err = new Error('Usuario no encontrado');
+    err.status = 401;
+    throw err;
+  }
+
+  const jwtPayload = { sub: usuario.id, rol: usuario.rol, correo: usuario.correo };
+  return {
+    token: signAccessToken(jwtPayload),
+    refresh_token: signRefreshToken({ sub: usuario.id, typ: 'refresh' }),
+  };
 }
 
 async function forgot({ correo }) {
@@ -124,9 +171,9 @@ async function reset({ token, nueva_contrasena }) {
     throw err;
   }
   const hash = await bcrypt.hash(nueva_contrasena, 10);
-  await usuarioRepo.update(row.usuario_id, { contrasena: hash });
+  await usuarioRepo.updatePassword(row.usuario_id, hash);
   await resetRepo.markUsed(row.id);
   return { message: 'Contrasena actualizada' };
 }
 
-module.exports = { login, forgot, reset };
+module.exports = { login, getCaptcha, refresh, forgot, reset };

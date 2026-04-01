@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { login as loginService } from "../../services/authService";
+import { useEffect, useState } from "react";
+import { getCaptcha, login as loginService } from "../../services/authService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { isValidEmail, toText } from "../../utils/validators";
 
 const LoginPage = () => {
   const [correo, setCorreo] = useState("");
@@ -9,20 +10,60 @@ const LoginPage = () => {
   const [error, setError] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [captchaQuestion, setCaptchaQuestion] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [captchaLoading, setCaptchaLoading] = useState(true);
 
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  const loadCaptcha = async () => {
+    setCaptchaLoading(true);
+    try {
+      const data = await getCaptcha();
+      setCaptchaQuestion(data?.question || "");
+      setCaptchaToken(data?.token || "");
+      setCaptchaAnswer("");
+    } catch (_) {
+      setCaptchaQuestion("");
+      setCaptchaToken("");
+      setError("No se pudo cargar el captcha.");
+    } finally {
+      setCaptchaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCaptcha();
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const cleanCorreo = toText(correo);
+    const cleanContrasena = String(contrasena ?? "");
+    if (!isValidEmail(cleanCorreo)) {
+      setError("Correo invalido.");
+      return;
+    }
+    if (!cleanContrasena || cleanContrasena.length > 255) {
+      setError("Contrasena invalida.");
+      return;
+    }
+    if (!captchaToken || captchaAnswer.trim() === "") {
+      setError("Resuelve el captcha para continuar.");
+      return;
+    }
     setLoading(true);
     try {
-      const data = await loginService(correo, contrasena);
+      const data = await loginService(cleanCorreo, cleanContrasena, captchaToken, captchaAnswer.trim());
       login(data);
       navigate("/");
     } catch (err) {
-      setError(err.message || "Error al iniciar sesión");
+      const apiMessage = err?.response?.data?.message;
+      setError(apiMessage || err?.response?.data?.message || err.message || "Error al iniciar sesión");
+      await loadCaptcha();
     } finally {
       setLoading(false);
     }
@@ -180,6 +221,36 @@ const LoginPage = () => {
                   </div>
                 </label>
 
+                <label className="block">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="block text-sm font-semibold text-neutral-200">
+                      Captcha
+                    </span>
+                    <button
+                      type="button"
+                      onClick={loadCaptcha}
+                      disabled={captchaLoading}
+                      className="text-xs font-semibold text-[#f9d106] hover:underline disabled:opacity-60"
+                    >
+                      {captchaLoading ? "Cargando..." : "Cambiar"}
+                    </button>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                    <p className="text-sm text-neutral-300">
+                      {captchaLoading ? "Generando captcha..." : captchaQuestion || "Captcha no disponible"}
+                    </p>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="Tu respuesta"
+                      value={captchaAnswer}
+                      onChange={(e) => setCaptchaAnswer(e.target.value)}
+                      required
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-base text-white placeholder:text-neutral-400 outline-none transition focus:border-[#f9d106] focus:shadow-[0_0_0_4px_rgba(249,209,6,0.25)]"
+                    />
+                  </div>
+                </label>
+
                 {/* Acciones */}
                 <button
                   type="button"
@@ -193,7 +264,7 @@ const LoginPage = () => {
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || captchaLoading}
                   className="group relative mt-2 inline-flex w-full items-center justify-center overflow-hidden rounded-2xl bg-[#f9d106] px-5 py-3 font-extrabold text-[#0f0f0f] shadow-[0_10px_30px_rgba(249,209,6,0.35)] transition hover:translate-y-[-1px] hover:shadow-[0_14px_36px_rgba(249,209,6,0.45)] disabled:opacity-70"
                 >
                   {loading && (

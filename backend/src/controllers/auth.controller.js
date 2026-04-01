@@ -7,9 +7,23 @@ async function login(req, res, next) {
   } catch (err) { return next(err); }
 }
 
+async function captcha(req, res, next) {
+  try {
+    const data = await service.getCaptcha();
+    return res.json(data);
+  } catch (err) { return next(err); }
+}
+
 async function forgot(req, res, next) {
   try {
     const data = await service.forgot(req.body || {});
+    return res.json(data);
+  } catch (err) { return next(err); }
+}
+
+async function refresh(req, res, next) {
+  try {
+    const data = await service.refresh(req.body || {});
     return res.json(data);
   } catch (err) { return next(err); }
 }
@@ -21,4 +35,4 @@ async function reset(req, res, next) {
   } catch (err) { return next(err); }
 }
 
-module.exports = { login, forgot, reset };
+module.exports = { login, captcha, refresh, forgot, reset };

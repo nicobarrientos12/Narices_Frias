@@ -5,6 +5,8 @@ const morgan = require('morgan');
 
 const { errorHandler, notFound } = require('./middlewares/error.middleware');
 const routes = require('./routes');
+const authRoutes = require('./routes/auth.routes');
+const authCtrl = require('./controllers/auth.controller');
 const { env } = require('./config/env');
 
 const app = express();
@@ -23,6 +25,12 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+app.get('/api/auth/captcha', authCtrl.captcha);
+app.post('/api/auth/login', authCtrl.login);
+app.post('/api/auth/refresh', authCtrl.refresh);
+app.post('/api/auth/forgot', authCtrl.forgot);
+app.post('/api/auth/reset', authCtrl.reset);
+app.use('/api/auth', authRoutes);
 app.use('/api', routes);
 
 app.use(notFound);
